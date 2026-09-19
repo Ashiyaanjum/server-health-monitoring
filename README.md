@@ -7,6 +7,7 @@ A hardened PowerShell script for local report generation from Windows server hea
 - `ServerHealthMonitoring.ps1` — hardened monitoring script.
 - `SECURITY.md` — security requirements and reporting guidance.
 - `.gitignore` — prevents generated reports, state files, and local secrets from being committed.
+- `DEPLOYMENT_GUIDE.md` — professional setup, runtime-parameter, permissions, scheduling, and troubleshooting guide.
 
 ## Privacy behavior
 
