@@ -1,0 +1,21 @@
+# Generated monitoring output
+*.csv
+*.html
+*.json
+*.log
+
+# Local configuration and credentials
+.env
+*.credential
+*.secret
+secrets/
+
+# PowerShell transcripts and history
+*.transcript
+*.clixml
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
