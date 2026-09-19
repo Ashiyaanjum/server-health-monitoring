@@ -8,6 +8,7 @@ A hardened PowerShell script for local report generation from Windows server hea
 - `SECURITY.md` — security requirements and reporting guidance.
 - `.gitignore` — prevents generated reports, state files, and local secrets from being committed.
 - `DEPLOYMENT_GUIDE.md` — professional setup, runtime-parameter, permissions, scheduling, and troubleshooting guide.
+- `tests/Invoke-MockMonitoringTests.ps1` — dependency-free mock and privacy validation harness.
 
 ## Privacy behavior
 
