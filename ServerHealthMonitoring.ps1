@@ -15,20 +15,18 @@
 #Recommendation : Initially test this script on a lower environment, then run it on Prod.
 #____________________________________________________________________________________________________________________________________________
 
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$MonitoringTarget
+)
+
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
 function ConvertTo-HtmlSafe {
     param([AllowNull()][object]$Value)
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
-}
-
-function Get-ServerAlias {
-    param([Parameter(Mandatory)][string]$ComputerName)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($ComputerName.ToUpperInvariant())
-    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
-    $shortHash = ([BitConverter]::ToString($hash) -replace '-', '').Substring(0, 10)
-    return "SERVER_$shortHash"
 }
 
 function Assert-SafeServerTarget {
@@ -395,7 +393,7 @@ switch ($TopIssue)
 color:#1f2937;
 padding:12px;'>
 
-$(ConvertTo-HtmlSafe $server.ServerName)
+$(ConvertTo-HtmlSafe $server.TargetLabel)
 
 </td>
 
@@ -896,7 +894,7 @@ box-shadow:0px 2px 8px rgba(0,0,0,0.08);">
 
 <tr>
 
-<th style="width:14%;">Server</th>
+<th style="width:14%;">Target</th>
 
 <th style="width:12%;">Health</th>
 
@@ -1107,8 +1105,8 @@ Please do not reply to this email.
 # --- Configuration ---
 
 # List of servers to monitor, separated by commas. Use "localhost" to monitor the machine where the script is run.
-$serverlist = "SERVER_NAME" # Replace with approved targets only.
-$AllowedServers = @("SERVER_NAME") # Keep this allowlist synchronized with the approved targets.
+$serverlist = $MonitoringTarget -join ","
+$AllowedServers = $MonitoringTarget
 # Services to monitor (use Service Name or Display Name).
 $servicesToMonitor = @(
     "Tanium*",
@@ -1138,71 +1136,7 @@ $DiskCriticalThreshold = 10
 
 # Disk Alert Suppression (Hours)
 $DiskSuppressionHours = 2
-# ===========================================================================
-# Disk Alert Suppression Configuration
-# ===========================================================================
-
-$DiskAlertStateFile = Join-Path $outputDir "DiskAlertState.json"
-
-if (-not (Test-Path $DiskAlertStateFile))
-{
-    @{} | ConvertTo-Json | Set-Content $DiskAlertStateFile
-}
-
-try
-{
-    $Json = Get-Content $DiskAlertStateFile -Raw
-
-    if ([string]::IsNullOrWhiteSpace($Json))
-    {
-        $DiskAlertState = @{}
-    }
-    else
-    {
-        $DiskAlertState = @{}
-
-        $obj = $Json | ConvertFrom-Json
-
-        foreach ($p in $obj.PSObject.Properties)
-        {
-            $DiskAlertState[$p.Name.ToUpper()] = $p.Value
-        }
-    }
-
-    Write-Verbose "Alert state loaded."
-}
-catch
-{
-    $DiskAlertState = @{}
-}
-# ===========================================================================
-# EMAIL CONFIGURATION
-# ===========================================================================
-
-$SMTPServer = "SMTP_SERVER"
-$SMTPPort   = 587
-$SmtpUseSsl = $true
-
-$EmailFrom = "ServerHealthMonitor@example.invalid"
-
-$EmailTo = @(
-    "recipient1@example.invalid",
-    "recipient2@example.invalid",
-    "recipient3@example.invalid",
-    "recipient4@example.invalid"
-   
-)
-
-$EmailSubject = "[External] Enterprise Server Health Monitoring Report - $(Get-Date -Format 'dd-MMM-yyyy')"
-
-$EmailBody = @"
-Hello Team,
-
-Please find the attached Server Health Monitoring Report.
-
-Regards,
-Server Health Monitoring
-"@
+# Email delivery is intentionally disabled. This script writes local reports only.
 
 # --- Script Logic ---
 
@@ -1226,15 +1160,14 @@ foreach ($targetServer in $ServerListArray) {
 }
 
 $TimeStamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$SafeFileStem = (($ServerListArray -join "_") -replace '[^A-Za-z0-9_.-]', '_')
-$outputFilePath = Join-Path $outputDir "ServerHealth_${SafeFileStem}_${TimeStamp}.csv"
+$outputFilePath = Join-Path $outputDir "HealthReport_${TimeStamp}.csv"
 $Result = @()
 
 # Define script block for remote execution (or local if $server is 'localhost')
 $commandlist = {
-    param($services, $serverAlias)
+    param($services)
    
-    $hostname = $serverAlias
+    $targetLabel = "REDACTED"
 
     # 1. System Uptime
     $os = Get-CimInstance Win32_OperatingSystem
@@ -1297,13 +1230,12 @@ try
         Sort-Object CPU -Descending |
         Select-Object -First 5 `
             ProcessName,
-            Id,
             @{Name="CPUSeconds";Expression={[math]::Round($_.CPU,2)}}
 
     $topCPUProcessSummary = (
         $topCPUProcesses |
         ForEach-Object {
-            "$($_.ProcessName) PID:$($_.Id) CPU:$($_.CPUSeconds)s"
+            "$($_.ProcessName) CPU:$($_.CPUSeconds)s"
         }
     ) -join "`r`n"
 }
@@ -1342,13 +1274,12 @@ try
         Sort-Object WorkingSet64 -Descending |
         Select-Object -First 5 `
             ProcessName,
-            Id,
             @{Name="MemoryMB";Expression={[math]::Round($_.WorkingSet64/1MB,2)}}
 
     $topMemProcessSummary = (
         $topMemProcesses |
         ForEach-Object{
-            "$($_.ProcessName) PID:$($_.Id) RAM:$($_.MemoryMB)MB"
+            "$($_.ProcessName) RAM:$($_.MemoryMB)MB"
         }
   ) -join "`r`n"
 }
@@ -1508,7 +1439,7 @@ elseif (
 }
 [PSCustomObject]@{
 
-    ServerName = $hostname
+    TargetLabel = $targetLabel
    
     ReportTime = Get-Date -Format "dd-MMM-yyyy HH:mm:ss"
 
@@ -1540,14 +1471,14 @@ foreach ($server in $ServerListArray)
 {
     Write-Host ""
     Write-Host "=========================================" -ForegroundColor Cyan
-    Write-Host "Processing Server : $server" -ForegroundColor Cyan
+    Write-Host "Processing approved monitoring target." -ForegroundColor Cyan
     Write-Host "=========================================" -ForegroundColor Cyan
 
     try
     {
         if ($server.Trim().ToLower() -eq "localhost")
         {
-            $output = & $commandlist -services $servicesToMonitor -serverAlias (Get-ServerAlias -ComputerName $env:COMPUTERNAME)
+            $output = & $commandlist -services $servicesToMonitor
         }
         else
         {
@@ -1560,13 +1491,13 @@ foreach ($server in $ServerListArray)
             $output = Invoke-Command `
                         -ComputerName $server `
                         -ScriptBlock $commandlist `
-                        -ArgumentList (,$servicesToMonitor), (Get-ServerAlias -ComputerName $server) `
+                        -ArgumentList (,$servicesToMonitor) `
                         -ErrorAction Stop
         }
 
         $Result += $output
 
-        Write-Host "SUCCESS : $server completed." -ForegroundColor Green
+        Write-Host "SUCCESS: monitoring completed." -ForegroundColor Green
     }
    catch
 {
@@ -1601,7 +1532,6 @@ if ($AlertResults.Count -eq 0)
     Write-Host "All monitored servers are healthy." -ForegroundColor Green
     Write-Host "No threshold breached." -ForegroundColor Green
     Write-Host "CSV report was not generated." -ForegroundColor Green
-    Write-Host "Email was not sent." -ForegroundColor Green
     Write-Host "======================================" -ForegroundColor Green
     return
 }
@@ -1619,17 +1549,17 @@ foreach ($serverResult in $Result)
     {
         "Healthy"
         {
-            Write-Host "$($serverResult.ServerName) : HEALTHY" -ForegroundColor Green
+            Write-Host "HEALTHY result recorded." -ForegroundColor Green
         }
 
         "Warning"
         {
-            Write-Host "$($serverResult.ServerName) : WARNING" -ForegroundColor Yellow
+            Write-Host "WARNING result recorded." -ForegroundColor Yellow
         }
 
         "Critical"
         {
-            Write-Host "$($serverResult.ServerName) : CRITICAL" -ForegroundColor Red
+            Write-Host "CRITICAL result recorded." -ForegroundColor Red
         }
     }
 }
@@ -1642,126 +1572,9 @@ Write-Host "Monitoring Completed Successfully." -ForegroundColor Green
 # Disk Alert Suppression
 # ===========================================================================
 
-$CurrentTime = Get-Date
-$ServersToEmail = @()
+# Keep only warning and critical results for the local report.
+$Result = $AlertResults
 
-foreach ($server in $Result)
-{
-    $ServerKey = $server.ServerName.Trim().ToUpper()
-Write-Verbose "Processing alert state for an approved server target."
-
-    $SendEmail = $false
-
-    # ------------------------------------------------------------
-    # CPU
-    # ------------------------------------------------------------
-
-    $CPUAlert =
-        ($server.CPU_Utilization_Percent -ne "N/A") -and
-        ([double]$server.CPU_Utilization_Percent -ge $CPUWarningThreshold)
-
-    # ------------------------------------------------------------
-    # Memory
-    # ------------------------------------------------------------
-
-    $MemoryAlert =
-        ($server.Memory_Utilization_Percent -ne "N/A") -and
-        ([double]$server.Memory_Utilization_Percent -ge $MemoryWarningThreshold)
-
-    if ($CPUAlert -or $MemoryAlert)
-    {
-        $SendEmail = $true
-    }
-
-    # ------------------------------------------------------------
-    # Disk
-    # ------------------------------------------------------------
-
-    $DiskAlert = $false
-
-    foreach ($drive in ($server.Disk_Summary -split "--------------------------"))
-    {
-        if ($drive -match "Free Space \(%\)\s*:\s*([0-9\.]+)")
-        {
-            if ([double]$Matches[1] -lt $DiskWarningThreshold)
-            {
-                $DiskAlert = $true
-                break
-            }
-        }
-    }
-
-    if ($DiskAlert)
-    {
-        if ($DiskAlertState.ContainsKey($ServerKey))
-        {
-            $LastSent = [datetime]::Parse($DiskAlertState[$ServerKey])
-
-            if (($CurrentTime - $LastSent).TotalHours -ge $DiskSuppressionHours)
-            {
-                $DiskAlertState[$ServerKey] = $CurrentTime.ToString("o")
-                $SendEmail = $true
-
-                Write-Host "$ServerKey : Disk suppression expired." -ForegroundColor Cyan
-            }
-            else
-            {
-                Write-Host "$ServerKey : Disk alert suppressed." -ForegroundColor Yellow
-            }
-        }
-        else
-        {
-            $DiskAlertState[$ServerKey] = $CurrentTime.ToString("o")
-            $SendEmail = $true
-
-            Write-Host "$ServerKey : First disk alert." -ForegroundColor Green
-        }
-    }
-    else
-    {
-        if ($DiskAlertState.ContainsKey($ServerKey))
-        {
-            $DiskAlertState.Remove($ServerKey)
-
-            Write-Host "$ServerKey : Disk healthy. Suppression reset." -ForegroundColor Green
-        }
-    }
-
-    # ------------------------------------------------------------
-    # Add Server Once
-    # ------------------------------------------------------------
-
-    if ($SendEmail)
-    {
-        $ServersToEmail += $server
-    }
-}
-
-# Save JSON
-
-try
-{
-    $DiskAlertState |
-        ConvertTo-Json -Depth 3 |
-        Set-Content $DiskAlertStateFile
-}
-catch
-{
-    Write-Host "Unable to save DiskAlertState.json" -ForegroundColor Red
-}
-
-if ($ServersToEmail.Count -eq 0)
-{
-    Write-Host ""
-    Write-Host "No email notification required." -ForegroundColor Yellow
-    return
-}
-
-$Result = $ServersToEmail
-
-
-
-   
 # Export to CSV
 try
 {
@@ -1786,34 +1599,4 @@ catch
 }
 
 
-Write-Host "Sending Email..." -ForegroundColor Cyan
-
-if ($SMTPServer -eq "SMTP_SERVER" -or $EmailFrom -like "*@example.invalid") {
-    throw "SMTP configuration still contains placeholders. Configure an approved SMTP relay before running."
-}
-if (-not $SmtpUseSsl) {
-    throw "TLS is required for SMTP delivery."
-}
-
-# Credentials are requested at runtime and are never stored in this script.
-$SmtpCredential = Get-Credential -Message "Enter the approved SMTP relay credential"
-if ($null -eq $SmtpCredential -or [string]::IsNullOrWhiteSpace($SmtpCredential.UserName)) {
-    throw "An SMTP credential is required."
-}
-
-Send-MailMessage `
-    -SmtpServer $SMTPServer `
-    -Port $SMTPPort `
-    -UseSsl:$SmtpUseSsl `
-    -Credential $SmtpCredential `
-    -From $EmailFrom `
-    -To $EmailTo `
-    -Subject $EmailSubject `
-    -Body $htmlReport `
-    -BodyAsHtml `
-    -Attachments $outputFilePath
-
-
-Write-Host "Email Sent Successfully." -ForegroundColor Green
-
-
+Write-Host "Report saved locally; email delivery is disabled." -ForegroundColor Green
